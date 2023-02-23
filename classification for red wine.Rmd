@@ -1,0 +1,205 @@
+---
+title: "classification"
+author: "Achraf chekaoui"
+date: "5/1/2022"
+output: html_document
+---
+---
+title: "Red Wine Quality"
+author: "Achraf chekaoui"
+date: "4/30/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Red Wine Quality  
+
+#Data description : 
+For this study I will analyze a Red Wine data set created by:   
+Paulo Cortez (Univ. Minho), Antonio Cerdeira, Fernando Almeida, Telmo Matos and Jose Reis (CVRVV) @ 2009. This data set has 1599 observation and it contains 11 input variables: fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates, alcohol and the output variable quality.
+Input variables (based on physicochemical tests):all the variables are numerical. 
+1 - Fixed Acidity: Most acids involved with wine or fixed or nonvolatile (do not evaporate readily) (tartaric acid - g/dm^3)
+
+2 - Volatile Acidity: The amount of acetic acid in wine, which at too high of levels can lead to an unpleasant, vinegar taste. (acetic acid - g/dm^3)
+
+3 - Citric Acid: Found in small quantities, citric acid can add ‘freshness’ and flavor to wines. (g/dm^3)
+
+4 - Residual Sugar: The amount of sugar remaining after fermentation stops, it’s rare to find wines with less than 1 gram/liter and wines with greater than 45 grams/liter are considered sweet. (g/dm^3)
+
+5 - Chlorides: The amount of salt in the wine. (sodium chloride - g/dm^3)
+
+6 - Free Sulfur Dioxide: The free form of SO2 exists in equilibrium between molecular SO2 (as a dissolved gas) and bisulfite ion; it prevents microbial growth and the oxidation of wine. (mg/dm^3)
+
+7 - Total Sulfur Dioxide: Amount of free and bound forms of S02; in low concentrations, SO2 is mostly undetectable in wine, but at free SO2 concentrations over 50 ppm, SO2 becomes evident in the nose and taste of wine. (mg/dm^3)
+
+8 - Density: The density of water is close to that of water depending on the percent alcohol and sugar content. (g/cm^3)
+
+9 - pH: Describes how acidic or basic a wine is on a scale from 0 (very acidic) to 14 (very basic); most wines are between 3-4 on the pH scale
+
+10 - Sulphates: A wine additive which can contribute to sulfur dioxide gas (S02) levels, wich acts as an antimicrobial and antioxidant. (g/dm3)
+
+11 - Alcohol: The percent alcohol content of the wine
+
+Output variable (based on sensory data):
+
+12 - quality (score between 0 and 10) 
+
+#Goal :  
+we are going to use machine learning to determine which physiochemical properties make a wine *'good'*!
+Three methods are compared for the data, the best one is selected and applied to the data for the final model in order to determin the quality of wine.
+
+
+#Method :
+we are going to apply  three different supervised learning algorithms on this data,logistic regression,neural network and linear discriminant analysis. using 10-fold cross validation to compare the performance of the three methods we are going to choose the best method that give us the best prediction model for the wine quality. 
+First we will set an arbitrary cutoff for our dependent variable (wine quality) at e.g. 7 or higher getting classified as 'good/1' and the remainder as 'not good/0'. 
+Then we split the data into training and test set. The training set should be used to build our machine
+learning models. in other words we are going to create a model based on our training data then we test our
+model on the test data.The test set should be used to see how well our model performs on unseen data.For
+each passenger in the test set, we use the model that we trained to predict whether or not they survived the
+sinking of the Titanic.
+
+```{r} 
+library(readxl)
+wine <- read_excel("winequality-red.xlsx")
+sum(is.na(wine)) # no missing values in the data  
+
+```
+
+```{r}
+library(nnet)
+library(MASS)
+library(pROC)
+library(randomForest)
+library(ggplot2)
+
+wine$quality <- as.factor(wine$quality)
+# Set K=10 to perform 10-fold cross validation
+K =10 
+set.seed(123) # always set seed before randomization
+
+# Randomly divide and then assign all data points to the K folds.
+fold.assignments =sample(rep(1:K,length=nrow(wine)))
+
+# Initialize the err.cv matrix to store the 10 cross-validation errors for LM and NN.
+# It is a KX2 matrix, the first column is for MLR, the 2nd is for NN.
+err.cv = matrix(0,K,3)
+colnames(err.cv) = c("LR","NN","LDA")
+
+# The outer "for" loop
+# The loop is to perform cross-validation for the two methods using the same data every time.
+for (k in 1:K){
+  # Print out progress 
+  cat("Fold",k,"... ")
+  
+  # Partition into training and test sets 
+  inds = which(fold.assignments==k) 
+  test = wine[inds, ]# data in the kth fold is the test set
+  train = wine[-inds, ] # the remaining is for the train set
+  
+
+  
+  # set up grid for the values of tuning parameters.
+  grid=c(5,10,15,20,25,30,50)
+  
+  M = 10 # 10-folds CV for inner loops
+  set.seed(1)
+  inner.fold.assignments =sample(rep(1:M,length=nrow(train)))
+  
+  NN.err.cv = matrix(0,length(grid),M)
+  rownames(NN.err.cv) = grid
+  colnames(NN.err.cv) = paste("fold_",1:M,sep="")
+  
+  # inner for loop
+  for (j in 1:M){
+    inner.inds = which(inner.fold.assignments==j) 
+    
+    inner.train = train[-inner.inds,] 
+    
+    mean = apply(inner.train,2,mean)
+    std = apply(inner.train,2,sd) 
+    
+    new = scale (train,center=mean,scale=std)
+    
+    new.train = new[-inner.inds,]
+    new.test =new[inner.inds,]
+    
+    for (i in 1:length(grid)){
+      num_nodes= grid[i]
+      
+      fit = glmnet(quality~.,data=new.train,size=num_nodes,
+                 linout=TRUE,maxit=200,trace=FALSE)
+      pred = predict(fit,newdata=new.test)
+      NN.err.cv[i,j] = mean((pred[,1]-new.test[,"quality"])^2)
+    }
+  }
+  mse = rowMeans(NN.err.cv)
+  
+  # the best number of nodes
+  outer.num_nodes = as.numeric(names(mse)[which.min(mse)]) 
+  
+  #(a) Next, please normalize the train and test set using info of train set.
+  # Hint: refer to lines 4-8 of Adv_StatLearning_4_part_3_annotated.pdf.
+  mean.train<- apply(train, 2, mean)
+  std.train <- apply(train, 2, sd)
+  train_data <- as.data.frame(scale(train, center = mean.train, scale = std.train))
+  test_data <- as.data.frame(scale(test, center = mean.train, scale = std.train))
+  
+  #(b) Then, fit lm() and nnet() to the normalized train set, where nnet() must 
+  #include the argument: size = outer.num_nodes.
+  nn_model = glmnet(quality~., data=train_data, size = outer.num_nodes,
+             linout=TRUE, maxit=200, trace=FALSE)
+  lm_model = glm(quality~., family = "binomial",data=train_data) 
+  lda_model = lda(quality~ . , data = train_data)
+  #RDF_model = randomForest(quality~., data= wine,subset=train_data,
+                # mtry=3,ntree=500,importance=TRUE)#We choose mtry=3 because sqrt(20) = 4 approximately.
+   #prc_model =prcomp(wine, scale=TRUE) 
+  #(c) Then, make predicttion on the normalized test set for both linear model 
+  #and the NN model, respectively.
+  nn.prediction = predict(nn_model, newdata = test_data, type="raw")
+  lm.prediction = predict(lm_model, newdata = test_data)
+ 
+  lda.prediction=predict(lda_model, newdata = test_data)
+  #RDF.prediction=predict(RDF_model, newdata = test_data) 
+  #prc.prediction = predict(prc_model, newdata = test_data)
+  
+  test_data$quality <- ifelse(test_data$quality >=7, 1, 0) 
+  optimal <- optimalCutoff(test_data$quality, lda.prediction)[1]
+  confusionMatrix(test_data$quality, lda.prediction) 
+  
+  optimal1 <- optimalCutoff(test_data$quality, lm.prediction)[1]
+  confusionMatrix(test_data$quality, lm.prediction) 
+  
+  optimal2 <- optimalCutoff(test_data$quality, nn.prediction)[1]
+  confusionMatrix(test_data$quality, nn.prediction)
+  
+  
+  #(d) Calculate the mean square error for the normalized test sets and store 
+  #them to the kth row of the matrix: err.cv.
+  err.cv[k, 1] = misClassError(test_data$quality, lm.prediction, threshold=optimal1)
+  err.cv[k, 2] = misClassError(test_data$quality, lda.prediction, threshold=optima2)
+  err.cv[k, 3] = misClassError(test_data$quality, lda.prediction, threshold=optimal)
+}
+
+
+#(e) Please draw a boxplot for err.cv for the test errors for the MLR and NN models. 
+# If you use ggplot(), you might need the melt() in `reshape` package to reshape
+# the err.vc dataframe.
+err.cv.df <- stack(as.data.frame(err.cv))
+Bplot <- ggplot(data=err.cv.df)+geom_boxplot(aes(x=ind, y=values)) 
+Bplot
+
+#(f) Perform paired t-test using t.test() to the cross-validation errors for 
+# difference in the CV errors between the two methods.
+t.test(err.cv[,1], err.cv[,2], paired=TRUE)
+```
+
+
+## Logistic regression:
+
+
+
+
+
